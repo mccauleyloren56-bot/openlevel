@@ -10,7 +10,17 @@
  * confirmation, not the credential.
  */
 export function resolveSecret(name: string): string | undefined {
-  const envKey = name.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
-  return process.env[envKey]
-}
+  const parts = name.split(/[^A-Za-z0-9]+/).filter(Boolean)
+  if (parts.length === 0) return undefined
 
+  const [scope, ...secretParts] = parts
+  const documentedKey = [scope, ...secretParts.map((part) => part.toUpperCase())].join('_')
+  const preservedKey = parts.join('_')
+  const uppercaseKey = preservedKey.toUpperCase()
+
+  return (
+    process.env[documentedKey] ??
+    process.env[preservedKey] ??
+    process.env[uppercaseKey]
+  )
+}
