@@ -10,7 +10,9 @@
  * confirmation, not the credential.
  */
 export function resolveSecret(name: string): string | undefined {
-  const envKey = name.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
-  return process.env[envKey]
+  // Preserve meaningful casing in the vault item name so the documented mapping
+  // remains exact on case-sensitive hosts (Linux/GitHub Actions). Keep the legacy
+  // all-uppercase lookup as a fallback so existing deployments are not broken.
+  const envKey = name.replace(/[^A-Za-z0-9]+/g, '_')
+  return process.env[envKey] ?? process.env[envKey.toUpperCase()]
 }
-
