@@ -1,9 +1,5 @@
 import type { Database } from '../db/database'
 import { renderTemplate } from '../lib/merge-fields'
-import {
-  resolveEmailSender as resolveConfiguredEmailSender,
-  type ResolvedEmailSender,
-} from '../lib/sending/resolve'
 import { type Contact, ContactsRepo } from '../repos/contacts-repo'
 import { CustomValuesRepo } from '../repos/custom-values-repo'
 import { TimelineRepo } from '../repos/timeline-repo'
@@ -22,9 +18,7 @@ export interface WorkflowRunPayload {
   triggerType: string
 }
 
-/** Defers the steps after a `wait`. The thunk returns the resume promise so a
- * caller (usually a test/dev process) can await completion; production uses the
- * durable resume scheduler below instead of an in-memory timer. */
+/** Defers the steps after a wait in test/dev processes. */
 export type Scheduler = (thunk: () => Promise<unknown>, ms: number) => void
 
 /** Everything required to resume one paused workflow after a process restart. */
@@ -37,24 +31,13 @@ export interface WorkflowResumeRequest {
 /** Persists a workflow resume request outside this process. */
 export type DurableResumeScheduler = (request: WorkflowResumeRequest, ms: number) => Promise<void>
 
-/** Resolve the configured sender for one location. Injectable so workflow tests
- * can prove delivery and failure handling without making a network request. */
-export type EmailSenderResolver = (db: Database, locationId: string) => Promise<ResolvedEmailSender>
-
 /**
  * setTimeout stores its delay in a 32-bit signed int. A value above this ceiling
- * (~24.8 days) silently clamps to 1ms and fires almost immediately — so a naive
- * `setTimeout(resume, waitMs({ days: 30 }))` would run the rest of a month-long
- * drip the instant it was scheduled. MAX_TIMEOUT_MS is that ceiling.
+ * (~24.8 days) silently clamps to 1ms.
  */
 export const MAX_TIMEOUT_MS = 2_147_483_647
 
-/**
- * Split a delay into setTimeout-safe chunks. A short wait is returned as a single
- * chunk; a multi-week wait becomes several chunks each at or under the ceiling,
- * summing to the exact original duration so the scheduler can re-arm until the
- * full time elapses without losing or inventing time.
- */
+/** Split a delay into setTimeout-safe chunks. */
 export function timeoutChunks(ms: number): number[] {
   if (!(ms > 0)) return [0]
   const chunks: number[] = []
@@ -74,7 +57,6 @@ const defaultSchedule: Scheduler = (thunk, ms) => {
       if (i + 1 < chunks.length) arm(i + 1)
       else void thunk()
     }, chunks[i] ?? 0)
-    // Don't keep the dev process alive just for a pending wait.
     ;(t as { unref?: () => void }).unref?.()
   }
   arm(0)
@@ -82,15 +64,13 @@ const defaultSchedule: Scheduler = (thunk, ms) => {
 
 export interface WorkflowRunnerDeps {
   db: Database
-  /** Test/dev fallback. Production should inject deferResume. */
+  /** Test/dev fallback. Production injects deferResume. */
   schedule?: Scheduler
   /** Durable pg-boss-backed scheduler used in production. */
   deferResume?: DurableResumeScheduler
-  resolveEmailSender?: EmailSenderResolver
 }
 
-/** Translate a wait step's config into milliseconds. Sums any supported units;
- * ignores zero/negative/non-numeric values so a delay is never negative. */
+/** Translate a wait step's config into milliseconds. */
 export function waitMs(config: Record<string, unknown>): number {
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
   const secs = n(config.seconds) + n(config.minutes) * 60 + n(config.hours) * 3600 + n(config.days) * 86_400
@@ -115,10 +95,9 @@ function safeErrorMessage(error: unknown): string {
 }
 
 /**
- * Execute one action and return its result row. add_tag mutates the contact.
- * send_email resolves the location's provider and performs a real delivery;
- * send_sms remains an honest timeline-only action until its live rail is wired.
- * Missing contacts/configuration are skipped rather than falsely reported sent.
+ * Execute one action and return its result row. Effects are real where we can be
+ * honest about them: add_tag mutates the contact; send_sms/send_email render the
+ * body and log an activity event. No external communications provider is assumed.
  */
 async function executeAction(
   db: Database,
@@ -127,7 +106,6 @@ async function executeAction(
   contact: Contact | null,
   position: number,
   customValues: Record<string, string>,
-  emailResolver: EmailSenderResolver,
 ): Promise<WorkflowRunStep> {
   const base = { position, type: action.type }
 
@@ -139,97 +117,27 @@ async function executeAction(
       await new ContactsRepo(db, locationId).addTag(contact.id, tag)
       return { ...base, status: 'done', detail: `Added tag "${tag}"` }
     }
-    case 'send_sms': {
-      if (!contact) return { ...base, status: 'skipped', detail: 'No contact to send SMS' }
+    case 'send_sms':
+    case 'send_email': {
+      const channel = action.type === 'send_sms' ? 'SMS' : 'Email'
+      if (!contact) return { ...base, status: 'skipped', detail: `No contact to send ${channel}` }
       const body = renderTemplate(
         typeof action.config.body === 'string' ? action.config.body : '',
         contact,
         customValues,
       )
+      const subject =
+        action.type === 'send_email' && typeof action.config.subject === 'string'
+          ? renderTemplate(action.config.subject, contact, customValues)
+          : null
       await new TimelineRepo(db, locationId).add({
         contactId: contact.id,
         type: 'automation_action',
         refTable: 'workflows',
-        payload: { action: action.type, channel: 'sms', body, status: 'logged' },
+        payload: { action: action.type, channel: channel.toLowerCase(), subject, body, status: 'logged' },
       })
       const preview = body.length > 60 ? `${body.slice(0, 60)}…` : body
-      return { ...base, status: 'done', detail: `SMS logged: "${preview}"` }
-    }
-    case 'send_email': {
-      if (!contact) return { ...base, status: 'skipped', detail: 'No contact to send Email' }
-      const to = contact.emails[0]?.trim()
-      if (!to) return { ...base, status: 'skipped', detail: 'Contact has no email address' }
-
-      const body = renderTemplate(
-        typeof action.config.body === 'string' ? action.config.body : '',
-        contact,
-        customValues,
-      )
-      const configuredSubject =
-        typeof action.config.subject === 'string'
-          ? renderTemplate(action.config.subject, contact, customValues).trim()
-          : ''
-      const subject = configuredSubject || 'Message from your business'
-      const timeline = new TimelineRepo(db, locationId)
-      const resolved = await emailResolver(db, locationId)
-
-      if (!resolved.ok) {
-        await timeline.add({
-          contactId: contact.id,
-          type: 'automation_action',
-          refTable: 'workflows',
-          payload: {
-            action: action.type,
-            channel: 'email',
-            subject,
-            body,
-            status: 'not_sent',
-            reason: resolved.reason,
-          },
-        })
-        return { ...base, status: 'skipped', detail: `Email not sent: ${resolved.reason}` }
-      }
-
-      try {
-        const result = await resolved.sender.sendEmail({
-          to,
-          toName: contact.name ?? undefined,
-          subject,
-          text: body,
-        })
-        await timeline.add({
-          contactId: contact.id,
-          type: 'automation_action',
-          refTable: 'workflows',
-          payload: {
-            action: action.type,
-            channel: 'email',
-            subject,
-            body,
-            status: 'sent',
-            provider: result.provider,
-            externalId: result.externalId,
-          },
-        })
-        const preview = body.length > 60 ? `${body.slice(0, 60)}…` : body
-        return { ...base, status: 'done', detail: `Email sent via ${result.provider}: "${preview}"` }
-      } catch (error) {
-        const reason = safeErrorMessage(error)
-        await timeline.add({
-          contactId: contact.id,
-          type: 'automation_action',
-          refTable: 'workflows',
-          payload: {
-            action: action.type,
-            channel: 'email',
-            subject,
-            body,
-            status: 'failed',
-            reason,
-          },
-        })
-        return { ...base, status: 'failed', detail: `Email failed: ${reason}` }
-      }
+      return { ...base, status: 'done', detail: `${channel} logged: "${preview}"` }
     }
     default:
       return { ...base, status: 'skipped', detail: `Unsupported action: ${action.type}` }
@@ -237,11 +145,9 @@ async function executeAction(
 }
 
 /**
- * Run a workflow's steps for one contact, recording an honest execution record in
- * workflow_runs. Status-agnostic: the dispatcher decides which workflows are live;
- * a manual test run drives a draft too. On a `wait`, the run is left `waiting`.
- * Production persists the resume request through pg-boss; tests/dev can fall back
- * to the in-process scheduler.
+ * Run a workflow's steps for one contact, recording an execution record.
+ * Production wait steps are persisted through pg-boss; tests/dev may use the
+ * in-process scheduler.
  */
 export async function runWorkflow(
   deps: WorkflowRunnerDeps,
@@ -251,17 +157,11 @@ export async function runWorkflow(
   const { db } = deps
   const { locationId } = payload
   const schedule = deps.schedule ?? defaultSchedule
-  const emailResolver = deps.resolveEmailSender ?? resolveConfiguredEmailSender
-
   const runsRepo = new WorkflowRunsRepo(db, locationId)
 
   const workflow = await new WorkflowsRepo(db, locationId).get(payload.workflowId)
   if (!workflow) {
-    // A fresh run pointed at a missing workflow is a caller error — surface it
-    // synchronously so the dispatcher sees it.
     if (!opts.runId) throw new Error(`workflow ${payload.workflowId} not found in ${locationId}`)
-    // A resume whose workflow was deleted during the wait must NOT throw: this
-    // path runs inside a scheduled callback/job, so close the run out honestly.
     const failedStep: WorkflowRunStep = {
       position: opts.fromPosition ?? 0,
       type: 'wait',
@@ -276,9 +176,6 @@ export async function runWorkflow(
   const contact = payload.contactId
     ? ((await new ContactsRepo(db, locationId).get(payload.contactId)) ?? null)
     : null
-  // The location's custom values feed {{custom_values.<key>}} merge tags in
-  // message bodies. Fetched once per run (and again on a resume, so an edit made
-  // during a wait is picked up).
   const customValues = await new CustomValuesRepo(db, locationId).map()
 
   let run = opts.runId
@@ -300,6 +197,7 @@ export async function runWorkflow(
         detail: describeWait(action.config),
       }
       run = (await runsRepo.appendStep(run.id, waiting, 'waiting')) ?? run
+
       const request: WorkflowResumeRequest = {
         payload,
         runId: run.id,
@@ -329,9 +227,8 @@ export async function runWorkflow(
       return run
     }
 
-    const step = await executeAction(db, locationId, action, contact, i, customValues, emailResolver)
-    run = (await runsRepo.appendStep(run.id, step, step.status === 'failed' ? 'failed' : 'running')) ?? run
-    if (step.status === 'failed') return (await runsRepo.finish(run.id, 'failed')) ?? run
+    const step = await executeAction(db, locationId, action, contact, i, customValues)
+    run = (await runsRepo.appendStep(run.id, step, 'running')) ?? run
   }
 
   return (await runsRepo.finish(run.id, 'completed')) ?? run
