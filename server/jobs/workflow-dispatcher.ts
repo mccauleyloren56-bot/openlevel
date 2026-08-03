@@ -3,35 +3,34 @@ import type { WorkflowRun } from '../repos/workflow-runs-repo'
 import { WorkflowsRepo } from '../repos/workflows-repo'
 import { type WorkflowRunnerDeps, runWorkflow } from './workflow-runner'
 
+/** A resource attached to an event, such as the appointment that was booked. */
+export interface WorkflowEventResource {
+  type: string
+  id: string
+}
+
 /**
- * A real thing that happened in a location — a contact was created, a message
- * came in, an opportunity opened. The dispatcher turns it into workflow runs.
+ * A real thing that happened in a location. Optional resource/data fields let an
+ * external automation system such as n8n receive the useful event details while
+ * OpenLevel's internal workflow runner continues using the core trigger fields.
  */
 export interface WorkflowEvent {
+  /** Stable idempotency key. Appointment events use the appointment id. */
+  eventId?: string
   locationId: string
   triggerType: TriggerType
   contactId: string | null
+  resource?: WorkflowEventResource
+  data?: Record<string, unknown>
 }
 
 /**
  * What a route calls when something happens that workflows can trigger on. In
- * prod this enqueues a `workflow.dispatch` pg-boss job (durable, off the request
- * path); in dev/tests it runs the dispatch in-process. Routes depend on this
- * shape, not on pg-boss, so they stay pure.
+ * production this is queued off the request path; tests may run it in-process.
  */
 export type WorkflowDispatch = (event: WorkflowEvent) => void | Promise<void>
 
-/**
- * Fan one event out to every live workflow wired to that trigger, starting an
- * honest run for each. Draft workflows are ignored (only `status = 'live'`
- * fires). Returns the runs it started so callers/tests can inspect them; an
- * event with no matching live workflow is a no-op that returns `[]`.
- *
- * Runs are started sequentially to keep ordering deterministic and avoid a
- * thundering herd on the shared DB; each run is itself cheap (a handful of
- * scoped queries) and a `wait` step defers via the scheduler rather than
- * blocking here.
- */
+/** Fan one event out to every live OpenLevel workflow wired to that trigger. */
 export async function dispatchWorkflowEvent(
   deps: WorkflowRunnerDeps,
   event: WorkflowEvent,
