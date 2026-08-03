@@ -1,114 +1,89 @@
-# Business Follow-Up Proof of Concept
+# OpenLevel to n8n Proof of Concept
 
 ## Purpose
 
-Prove that OpenLevel can serve as the CRM foundation for a general business appointment and follow-up product before creating a Chrome extension, storefront, subscription plan, or AppSumo listing.
+Prove that OpenLevel can create a real appointment event and hand it to an authenticated n8n workflow before creating a Chrome extension, storefront, subscription plan, or AppSumo listing.
 
-## First Internal Use Case
+## Scope
 
-Use Loren's website-development operation as the first test business.
+This proof of concept tests only:
 
-A prospective customer should be able to:
+1. A public booking creates or updates one contact.
+2. The booking creates one appointment.
+3. OpenLevel emits an `appointment_booked` event containing the appointment id and schedule details.
+4. The event is sent to an n8n Webhook node using header authentication.
+5. n8n returns a successful acknowledgment.
+6. The same event id can be used by n8n to prevent duplicate processing.
 
-1. Submit a consultation appointment.
-2. Become a contact in OpenLevel.
-3. Create an appointment record.
-4. Receive an immediate confirmation email.
-5. Receive a short-delay test reminder.
-6. Appear in a simple owner dashboard.
-7. Be marked completed, cancelled, rescheduled, or no-show.
-8. Receive the correct follow-up after completion.
+## Excluded Until This Passes
 
-## POC Scope
-
-### Included
-
-- One test business account
-- Contacts
-- Appointments
-- Appointment statuses
-- Immediate confirmation email
-- Five-minute test reminder
-- Completion follow-up
-- Delivery and error logging
-- Duplicate-submission protection
-- Timezone-safe scheduling
-- Basic tenant-isolation test
-
-### Excluded Until the Core Loop Passes
-
-- Chrome Web Store packaging
+- Email delivery
+- SMS delivery
+- Chrome extension packaging
 - AppSumo redemption
 - Stripe subscriptions
-- SMS
-- AI chatbot
-- Public multi-product storefront
-- Full visual workflow builder
+- AI chatbot behavior
+- Public product storefront
 - Multiple industry templates
 
-## Required Test Loop
+## Event Shape
 
-```text
-Booking submitted
-  -> contact created or updated
-  -> appointment created
-  -> confirmation queued
-  -> confirmation delivered
-  -> reminder queued
-  -> reminder delivered
-  -> appointment status updated
-  -> follow-up delivered
-  -> complete activity history visible
+```json
+{
+  "source": "openlevel",
+  "version": 1,
+  "sentAt": "2026-08-03T22:00:00.000Z",
+  "event": {
+    "eventId": "appointment_booked:appt_123",
+    "locationId": "loc_123",
+    "triggerType": "appointment_booked",
+    "contactId": "contact_123",
+    "resource": {
+      "type": "appointment",
+      "id": "appt_123"
+    },
+    "data": {
+      "calendarId": "cal_123",
+      "calendarName": "Consultations",
+      "bookingSlug": "consultations",
+      "startsAt": "2026-08-04T16:00:00.000Z",
+      "endsAt": "2026-08-04T16:30:00.000Z"
+    }
+  }
+}
 ```
 
-## Test Timing
+## Authentication
 
-Development timing is intentionally compressed:
+OpenLevel sends the shared secret in this request header:
 
-- Confirmation: immediately
-- Reminder: five minutes after booking
-- Follow-up: five minutes after appointment completion
+```text
+X-OpenLevel-Key: <secret>
+```
 
-Production timing will only be enabled after the compressed flow passes.
+The secret must be stored outside source control. The n8n Webhook node must use Header Auth with the same header name and value.
 
 ## Pass Criteria
 
-The POC is considered technically viable only when all conditions below pass:
+The connection is considered proven only when:
 
 - The repository installs, type-checks, tests, and builds in CI.
-- A booking creates exactly one contact and one appointment.
-- Repeated booking submissions do not create duplicate reminders.
-- Confirmation and reminder jobs run with Chrome closed.
-- Cancelling an appointment prevents pending reminders.
-- Rescheduling replaces the old reminder time.
-- Failed email delivery is logged and retryable.
-- Two test businesses cannot access each other's records.
-- A database backup can be restored successfully.
-- No API keys or customer secrets are stored in the repository.
+- The n8n adapter unit tests pass.
+- The public booking test confirms the appointment event includes the appointment id and dates.
+- A manual GitHub Actions smoke test receives HTTP 2xx from the real n8n production webhook.
+- The n8n execution displays the same `eventId` sent by OpenLevel.
+- No API keys or webhook secrets appear in source control or logs.
 
-## Architecture Under Test
+## Current Architecture Under Test
 
 ```text
-Public test booking form
-        -> OpenLevel API and CRM
-        -> server-side job queue
-        -> email provider
-        -> activity and delivery logs
-        -> later Chrome side-panel client
+Public booking request
+        -> OpenLevel contact + appointment
+        -> appointment_booked event
+        -> authenticated n8n webhook
+        -> n8n acknowledgment
 ```
-
-## Automation Strategy
-
-n8n may be used as a temporary workflow prototype. The product must not expose or resell n8n without the appropriate commercial license. Fixed appointment workflows may instead be implemented directly in the OpenLevel backend using its PostgreSQL job-queue foundation.
-
-## Security Rules
-
-- All secrets must be environment variables.
-- Every API request must be scoped to the authenticated business.
-- Appointment creation must be idempotent.
-- Email links must not expose internal record identifiers without signed tokens.
-- Logs must not contain API keys or full sensitive payloads.
 
 ## Next Milestone
 
-After the baseline CI passes, inspect the current contact, calendar, automation, API, authentication, and database implementation. Then add the smallest end-to-end appointment test without redesigning the application.
+After the real webhook test passes, connect the n8n workflow to one harmless test action and then write the result back to a deployed OpenLevel callback endpoint. No communication provider is selected during this connection proof.
