@@ -73,7 +73,7 @@ test('send_email hands the rendered message to the configured provider and audit
   ])
 
   const [event] = await db.query<{ payload: Record<string, unknown> }>(
-    "SELECT payload FROM timeline_events WHERE contact_id=$1 AND type='automation_action' ORDER BY created_at DESC LIMIT 1",
+    "SELECT payload FROM timeline_events WHERE contact_id=$1 AND type='automation_action' ORDER BY occurred_at DESC LIMIT 1",
     [contactId],
   )
   expect(event?.payload.status).toBe('sent')
@@ -97,7 +97,7 @@ test('send_email is honestly skipped when the business has no provider configure
   expect(run.steps[0]?.detail).toContain('no email provider connected')
 
   const [event] = await db.query<{ payload: Record<string, unknown> }>(
-    "SELECT payload FROM timeline_events WHERE contact_id=$1 AND type='automation_action' ORDER BY created_at DESC LIMIT 1",
+    "SELECT payload FROM timeline_events WHERE contact_id=$1 AND type='automation_action' ORDER BY occurred_at DESC LIMIT 1",
     [contactId],
   )
   expect(event?.payload.status).toBe('not_sent')
@@ -127,7 +127,7 @@ test('a provider failure marks the workflow run failed and records an audit even
   expect(run.steps[0]?.detail).toContain('provider unavailable')
 
   const [event] = await db.query<{ payload: Record<string, unknown> }>(
-    "SELECT payload FROM timeline_events WHERE contact_id=$1 AND type='automation_action' ORDER BY created_at DESC LIMIT 1",
+    "SELECT payload FROM timeline_events WHERE contact_id=$1 AND type='automation_action' ORDER BY occurred_at DESC LIMIT 1",
     [contactId],
   )
   expect(event?.payload.status).toBe('failed')
