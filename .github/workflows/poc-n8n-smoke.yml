@@ -1,0 +1,51 @@
+name: OpenLevel to n8n POC Smoke Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openlevel-n8n-poc-smoke
+  cancel-in-progress: false
+
+jobs:
+  n8n-smoke-test:
+    name: Send one appointment event to n8n
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      N8N_WEBHOOK_URL: ${{ secrets.N8N_WEBHOOK_URL }}
+      N8N_WEBHOOK_SECRET: ${{ secrets.N8N_WEBHOOK_SECRET }}
+
+    steps:
+      - name: Check out proof-of-concept branch
+        uses: actions/checkout@v4
+        with:
+          ref: poc-business-follow-up
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify n8n connection secrets exist
+        shell: bash
+        run: |
+          missing=0
+          for name in N8N_WEBHOOK_URL N8N_WEBHOOK_SECRET; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not configured in repository Actions secrets"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Install dependencies without inherited corrupt lockfile
+        run: |
+          rm -f package-lock.json
+          npm install --no-audit --no-fund
+
+      - name: Send OpenLevel appointment event to n8n
+        run: npx tsx scripts/poc-n8n-webhook.ts
