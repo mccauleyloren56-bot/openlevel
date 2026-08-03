@@ -23,9 +23,19 @@ export interface WorkflowRunPayload {
 }
 
 /** Defers the steps after a `wait`. The thunk returns the resume promise so a
- *  caller (a test, or a future pg-boss adapter) can await completion; the default
- *  uses setTimeout and ignores the promise (fire-and-forget). */
+ * caller (usually a test/dev process) can await completion; production uses the
+ * durable resume scheduler below instead of an in-memory timer. */
 export type Scheduler = (thunk: () => Promise<unknown>, ms: number) => void
+
+/** Everything required to resume one paused workflow after a process restart. */
+export interface WorkflowResumeRequest {
+  payload: WorkflowRunPayload
+  runId: string
+  fromPosition: number
+}
+
+/** Persists a workflow resume request outside this process. */
+export type DurableResumeScheduler = (request: WorkflowResumeRequest, ms: number) => Promise<void>
 
 /** Resolve the configured sender for one location. Injectable so workflow tests
  * can prove delivery and failure handling without making a network request. */
@@ -72,12 +82,15 @@ const defaultSchedule: Scheduler = (thunk, ms) => {
 
 export interface WorkflowRunnerDeps {
   db: Database
+  /** Test/dev fallback. Production should inject deferResume. */
   schedule?: Scheduler
+  /** Durable pg-boss-backed scheduler used in production. */
+  deferResume?: DurableResumeScheduler
   resolveEmailSender?: EmailSenderResolver
 }
 
 /** Translate a wait step's config into milliseconds. Sums any supported units;
- *  ignores zero/negative/non-numeric values so a delay is never negative. */
+ * ignores zero/negative/non-numeric values so a delay is never negative. */
 export function waitMs(config: Record<string, unknown>): number {
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
   const secs = n(config.seconds) + n(config.minutes) * 60 + n(config.hours) * 3600 + n(config.days) * 86_400
@@ -98,7 +111,7 @@ function describeWait(config: Record<string, unknown>): string {
 }
 
 function safeErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'unknown provider error'
+  return error instanceof Error ? error.message : 'unknown error'
 }
 
 /**
@@ -226,9 +239,9 @@ async function executeAction(
 /**
  * Run a workflow's steps for one contact, recording an honest execution record in
  * workflow_runs. Status-agnostic: the dispatcher decides which workflows are live;
- * a manual test run drives a draft too. On a `wait`, the run is left `waiting` and
- * the remaining steps are scheduled (default setTimeout) — `opts.runId` +
- * `opts.fromPosition` carry the resume so no step is lost or repeated.
+ * a manual test run drives a draft too. On a `wait`, the run is left `waiting`.
+ * Production persists the resume request through pg-boss; tests/dev can fall back
+ * to the in-process scheduler.
  */
 export async function runWorkflow(
   deps: WorkflowRunnerDeps,
@@ -248,9 +261,7 @@ export async function runWorkflow(
     // synchronously so the dispatcher sees it.
     if (!opts.runId) throw new Error(`workflow ${payload.workflowId} not found in ${locationId}`)
     // A resume whose workflow was deleted during the wait must NOT throw: this
-    // path runs inside a fire-and-forget scheduled callback, so a throw becomes an
-    // unhandled rejection and the run is stranded 'waiting' forever. Close it out
-    // honestly as failed instead.
+    // path runs inside a scheduled callback/job, so close the run out honestly.
     const failedStep: WorkflowRunStep = {
       position: opts.fromPosition ?? 0,
       type: 'wait',
@@ -289,9 +300,32 @@ export async function runWorkflow(
         detail: describeWait(action.config),
       }
       run = (await runsRepo.appendStep(run.id, waiting, 'waiting')) ?? run
-      const resumeId = run.id
-      const next = i + 1
-      schedule(() => runWorkflow(deps, payload, { runId: resumeId, fromPosition: next }), waitMs(action.config))
+      const request: WorkflowResumeRequest = {
+        payload,
+        runId: run.id,
+        fromPosition: i + 1,
+      }
+      const delayMs = waitMs(action.config)
+
+      if (deps.deferResume) {
+        try {
+          await deps.deferResume(request, delayMs)
+        } catch (error) {
+          const failed: WorkflowRunStep = {
+            position: i,
+            type: 'wait',
+            status: 'failed',
+            detail: `Could not schedule resume: ${safeErrorMessage(error)}`,
+          }
+          run = (await runsRepo.appendStep(run.id, failed, 'failed')) ?? run
+          return (await runsRepo.finish(run.id, 'failed')) ?? run
+        }
+      } else {
+        schedule(
+          () => runWorkflow(deps, request.payload, { runId: request.runId, fromPosition: request.fromPosition }),
+          delayMs,
+        )
+      }
       return run
     }
 
