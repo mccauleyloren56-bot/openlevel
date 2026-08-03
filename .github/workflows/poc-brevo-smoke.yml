@@ -1,0 +1,63 @@
+name: OpenLevel Brevo POC Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Brevo test mode"
+        required: true
+        default: sandbox
+        type: choice
+        options:
+          - sandbox
+          - live
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openlevel-brevo-poc-smoke
+  cancel-in-progress: false
+
+jobs:
+  brevo-smoke-test:
+    name: ${{ inputs.mode == 'live' && 'Send one real test email' || 'Validate Brevo in sandbox' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+      BREVO_FROM_EMAIL: ${{ secrets.BREVO_FROM_EMAIL }}
+      BREVO_FROM_NAME: ${{ secrets.BREVO_FROM_NAME }}
+      POC_TEST_EMAIL: ${{ secrets.POC_TEST_EMAIL }}
+      POC_BREVO_LIVE: ${{ inputs.mode == 'live' && '1' || '0' }}
+
+    steps:
+      - name: Check out proof-of-concept branch
+        uses: actions/checkout@v4
+        with:
+          ref: poc-business-follow-up
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify required secrets exist
+        shell: bash
+        run: |
+          missing=0
+          for name in BREVO_API_KEY BREVO_FROM_EMAIL POC_TEST_EMAIL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not configured in repository Actions secrets"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Install dependencies without inherited corrupt lockfile
+        run: |
+          rm -f package-lock.json
+          npm install --no-audit --no-fund
+
+      - name: Run Brevo smoke test
+        run: npx tsx scripts/poc-brevo-email.ts
