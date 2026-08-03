@@ -1,5 +1,9 @@
 import type { Database } from '../db/database'
 import { renderTemplate } from '../lib/merge-fields'
+import {
+  resolveEmailSender as resolveConfiguredEmailSender,
+  type ResolvedEmailSender,
+} from '../lib/sending/resolve'
 import { type Contact, ContactsRepo } from '../repos/contacts-repo'
 import { CustomValuesRepo } from '../repos/custom-values-repo'
 import { TimelineRepo } from '../repos/timeline-repo'
@@ -22,6 +26,10 @@ export interface WorkflowRunPayload {
  *  caller (a test, or a future pg-boss adapter) can await completion; the default
  *  uses setTimeout and ignores the promise (fire-and-forget). */
 export type Scheduler = (thunk: () => Promise<unknown>, ms: number) => void
+
+/** Resolve the configured sender for one location. Injectable so workflow tests
+ * can prove delivery and failure handling without making a network request. */
+export type EmailSenderResolver = (db: Database, locationId: string) => Promise<ResolvedEmailSender>
 
 /**
  * setTimeout stores its delay in a 32-bit signed int. A value above this ceiling
@@ -65,6 +73,7 @@ const defaultSchedule: Scheduler = (thunk, ms) => {
 export interface WorkflowRunnerDeps {
   db: Database
   schedule?: Scheduler
+  resolveEmailSender?: EmailSenderResolver
 }
 
 /** Translate a wait step's config into milliseconds. Sums any supported units;
@@ -88,12 +97,15 @@ function describeWait(config: Record<string, unknown>): string {
   return parts.length ? `Waiting ${parts.join(' ')}` : 'Waiting'
 }
 
+function safeErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'unknown provider error'
+}
+
 /**
- * Execute one action and return its result row. Effects are real where we can be
- * honest about them: add_tag mutates the contact; send_sms/send_email render the
- * body with merge fields and log an activity event (wiring these to a live SMS/
- * email carrier is a later integration — we never claim "delivered"). A missing
- * contact or empty config yields a `skipped` step rather than a failure.
+ * Execute one action and return its result row. add_tag mutates the contact.
+ * send_email resolves the location's provider and performs a real delivery;
+ * send_sms remains an honest timeline-only action until its live rail is wired.
+ * Missing contacts/configuration are skipped rather than falsely reported sent.
  */
 async function executeAction(
   db: Database,
@@ -102,6 +114,7 @@ async function executeAction(
   contact: Contact | null,
   position: number,
   customValues: Record<string, string>,
+  emailResolver: EmailSenderResolver,
 ): Promise<WorkflowRunStep> {
   const base = { position, type: action.type }
 
@@ -113,27 +126,97 @@ async function executeAction(
       await new ContactsRepo(db, locationId).addTag(contact.id, tag)
       return { ...base, status: 'done', detail: `Added tag "${tag}"` }
     }
-    case 'send_sms':
-    case 'send_email': {
-      const channel = action.type === 'send_sms' ? 'SMS' : 'Email'
-      if (!contact) return { ...base, status: 'skipped', detail: `No contact to send ${channel}` }
+    case 'send_sms': {
+      if (!contact) return { ...base, status: 'skipped', detail: 'No contact to send SMS' }
       const body = renderTemplate(
         typeof action.config.body === 'string' ? action.config.body : '',
         contact,
         customValues,
       )
-      const subject =
-        action.type === 'send_email' && typeof action.config.subject === 'string'
-          ? renderTemplate(action.config.subject, contact, customValues)
-          : null
       await new TimelineRepo(db, locationId).add({
         contactId: contact.id,
         type: 'automation_action',
         refTable: 'workflows',
-        payload: { action: action.type, channel: channel.toLowerCase(), subject, body, status: 'logged' },
+        payload: { action: action.type, channel: 'sms', body, status: 'logged' },
       })
       const preview = body.length > 60 ? `${body.slice(0, 60)}…` : body
-      return { ...base, status: 'done', detail: `${channel} logged: "${preview}"` }
+      return { ...base, status: 'done', detail: `SMS logged: "${preview}"` }
+    }
+    case 'send_email': {
+      if (!contact) return { ...base, status: 'skipped', detail: 'No contact to send Email' }
+      const to = contact.emails[0]?.trim()
+      if (!to) return { ...base, status: 'skipped', detail: 'Contact has no email address' }
+
+      const body = renderTemplate(
+        typeof action.config.body === 'string' ? action.config.body : '',
+        contact,
+        customValues,
+      )
+      const configuredSubject =
+        typeof action.config.subject === 'string'
+          ? renderTemplate(action.config.subject, contact, customValues).trim()
+          : ''
+      const subject = configuredSubject || 'Message from your business'
+      const timeline = new TimelineRepo(db, locationId)
+      const resolved = await emailResolver(db, locationId)
+
+      if (!resolved.ok) {
+        await timeline.add({
+          contactId: contact.id,
+          type: 'automation_action',
+          refTable: 'workflows',
+          payload: {
+            action: action.type,
+            channel: 'email',
+            subject,
+            body,
+            status: 'not_sent',
+            reason: resolved.reason,
+          },
+        })
+        return { ...base, status: 'skipped', detail: `Email not sent: ${resolved.reason}` }
+      }
+
+      try {
+        const result = await resolved.sender.sendEmail({
+          to,
+          toName: contact.name ?? undefined,
+          subject,
+          text: body,
+        })
+        await timeline.add({
+          contactId: contact.id,
+          type: 'automation_action',
+          refTable: 'workflows',
+          payload: {
+            action: action.type,
+            channel: 'email',
+            subject,
+            body,
+            status: 'sent',
+            provider: result.provider,
+            externalId: result.externalId,
+          },
+        })
+        const preview = body.length > 60 ? `${body.slice(0, 60)}…` : body
+        return { ...base, status: 'done', detail: `Email sent via ${result.provider}: "${preview}"` }
+      } catch (error) {
+        const reason = safeErrorMessage(error)
+        await timeline.add({
+          contactId: contact.id,
+          type: 'automation_action',
+          refTable: 'workflows',
+          payload: {
+            action: action.type,
+            channel: 'email',
+            subject,
+            body,
+            status: 'failed',
+            reason,
+          },
+        })
+        return { ...base, status: 'failed', detail: `Email failed: ${reason}` }
+      }
     }
     default:
       return { ...base, status: 'skipped', detail: `Unsupported action: ${action.type}` }
@@ -155,6 +238,7 @@ export async function runWorkflow(
   const { db } = deps
   const { locationId } = payload
   const schedule = deps.schedule ?? defaultSchedule
+  const emailResolver = deps.resolveEmailSender ?? resolveConfiguredEmailSender
 
   const runsRepo = new WorkflowRunsRepo(db, locationId)
 
@@ -211,8 +295,9 @@ export async function runWorkflow(
       return run
     }
 
-    const step = await executeAction(db, locationId, action, contact, i, customValues)
-    run = (await runsRepo.appendStep(run.id, step, 'running')) ?? run
+    const step = await executeAction(db, locationId, action, contact, i, customValues, emailResolver)
+    run = (await runsRepo.appendStep(run.id, step, step.status === 'failed' ? 'failed' : 'running')) ?? run
+    if (step.status === 'failed') return (await runsRepo.finish(run.id, 'failed')) ?? run
   }
 
   return (await runsRepo.finish(run.id, 'completed')) ?? run
