@@ -10,9 +10,17 @@
  * confirmation, not the credential.
  */
 export function resolveSecret(name: string): string | undefined {
-  // Preserve meaningful casing in the vault item name so the documented mapping
-  // remains exact on case-sensitive hosts (Linux/GitHub Actions). Keep the legacy
-  // all-uppercase lookup as a fallback so existing deployments are not broken.
-  const envKey = name.replace(/[^A-Za-z0-9]+/g, '_')
-  return process.env[envKey] ?? process.env[envKey.toUpperCase()]
+  const parts = name.split(/[^A-Za-z0-9]+/).filter(Boolean)
+  if (parts.length === 0) return undefined
+
+  const [scope, ...secretParts] = parts
+  const documentedKey = [scope, ...secretParts.map((part) => part.toUpperCase())].join('_')
+  const preservedKey = parts.join('_')
+  const uppercaseKey = preservedKey.toUpperCase()
+
+  return (
+    process.env[documentedKey] ??
+    process.env[preservedKey] ??
+    process.env[uppercaseKey]
+  )
 }
