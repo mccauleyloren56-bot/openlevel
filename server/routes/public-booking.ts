@@ -24,22 +24,11 @@ const bookSchema = z.object({
 })
 
 /**
- * Public, UNAUTHENTICATED booking pages — mounted at `/api/public/booking`
- * BEFORE the operatorAuth boundary, so the location comes from the URL (`:loc`).
- * A calendar is reachable here only while it is `booking_enabled`:
- *
- *   GET  /:loc/:slug              → the hosted booking page (visitor render)
- *   GET  /:loc/:slug/slots?date=  → open times for one local date (JSON)
- *   POST /:loc/:slug/book         → reserve a slot (creates contact + appointment)
- *
- * The slot math lives in lib/availability and is recomputed on every request, so
- * the page can never offer — or accept — a time that the calendar's own
- * appointments, notice window, or buffer have since closed. Booking dispatches
- * `appointment_booked`, closing the capture → automation loop.
+ * Public, unauthenticated booking pages mounted at /api/public/booking.
  */
 export function publicBookingRoute(deps: {
   db: Database
-  /** Fired after a booking so live `appointment_booked` workflows enroll the lead. */
+  /** Fired after a booking so OpenLevel and external automation can enroll it. */
   dispatch?: WorkflowDispatch
   /** Injectable clock — defaults to wall-clock; tests pin it for determinism. */
   now?: () => Date
@@ -47,20 +36,17 @@ export function publicBookingRoute(deps: {
   const app = new Hono<AppEnv>()
   const clock = () => deps.now?.() ?? new Date()
 
-  /** Load a booking-enabled calendar by slug, or undefined. */
   async function enabledCalendar(loc: string, slug: string): Promise<Calendar | undefined> {
     const cal = await new CalendarsRepo(deps.db, loc).getByBookingSlug(slug)
     return cal && cal.booking_enabled ? cal : undefined
   }
 
-  /** The location's branding color, or undefined. */
   async function brandColor(loc: string): Promise<string | undefined> {
     const location = await new LocationsRepo(deps.db).getById(loc)
     const color = location?.branding.color
     return typeof color === 'string' ? color : undefined
   }
 
-  // The hosted booking page. Unknown or not-enabled → a styled 404.
   app.get('/:loc/:slug', async (c) => {
     const loc = c.req.param('loc')
     const slug = c.req.param('slug')
@@ -76,7 +62,6 @@ export function publicBookingRoute(deps: {
     )
   })
 
-  // Open times for one local date — the source of truth (busy + notice + buffer).
   app.get('/:loc/:slug/slots', async (c) => {
     const loc = c.req.param('loc')
     const slug = c.req.param('slug')
@@ -93,9 +78,6 @@ export function publicBookingRoute(deps: {
     return c.json({ slots: slotsForDate(config, date, busy, clock()) })
   })
 
-  // Reserve a slot. Recomputes the offered slots RIGHT NOW and rejects a start
-  // that is no longer free (someone booked it, or notice has passed) — the
-  // double-book guard. Then upserts the contact and creates the appointment.
   app.post('/:loc/:slug/book', zValidator('json', bookSchema), async (c) => {
     const loc = c.req.param('loc')
     const slug = c.req.param('slug')
@@ -126,10 +108,6 @@ export function publicBookingRoute(deps: {
         notes: input.notes?.trim() || null,
       })
     } catch (err) {
-      // We lost the write race: between our slot snapshot above and this INSERT,
-      // another visitor claimed the same calendar+instant. The partial unique
-      // index turns that into a 23505, which is an honest "slot taken" — never a
-      // 500, and never a silent double-book. Any other error is a real fault.
       if (isUniqueViolation(err)) return c.json({ error: 'slot taken' }, 409)
       throw err
     }
@@ -141,8 +119,20 @@ export function publicBookingRoute(deps: {
       payload: { calendar: cal.name, start: match.start },
     })
 
-    // Drive the capture → automation loop: a live appointment_booked workflow runs.
-    await deps.dispatch?.({ locationId: loc, triggerType: 'appointment_booked', contactId: contact.id })
+    await deps.dispatch?.({
+      eventId: `appointment_booked:${appointment.id}`,
+      locationId: loc,
+      triggerType: 'appointment_booked',
+      contactId: contact.id,
+      resource: { type: 'appointment', id: appointment.id },
+      data: {
+        calendarId: cal.id,
+        calendarName: cal.name,
+        bookingSlug: slug,
+        startsAt: match.start,
+        endsAt: match.end,
+      },
+    })
 
     return c.json({ ok: true, appointmentId: appointment.id, contactId: contact.id })
   })
