@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page not found · [NAME]</title>
+<meta name="robots" content="noindex">
+<!--
+  CUSTOM 404 STARTER
+
+  Rules this file exists to enforce:
+  1. Reuse the real site layout, nav, tokens, and type. Import the site stylesheet
+     instead of the inline block below once the build exists.
+  2. Return a real 404 status, not a 200. Check the host's config, since SPA
+     fallbacks often serve 200 and tell crawlers the page exists.
+  3. Give one clear way out: home, plus the site's primary action.
+  4. No auto-redirect, and no joke that gets in the way of the exit.
+  5. Test it after deploy by visiting a garbage URL in incognito.
+-->
+<style>
+  :root {
+    --bg: [BG HEX]; --surface: [SURFACE HEX]; --text: [TEXT HEX];
+    --muted: [MUTED HEX]; --accent: [ACCENT HEX]; --radius: [RADIUS];
+    --display: [DISPLAY FONT]; --body: [BODY FONT];
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100dvh; background: var(--bg); color: var(--text);
+    font-family: var(--body); display: grid; place-items: center; padding: 1.5rem;
+  }
+  main { max-width: 44ch; }
+  .eyebrow {
+    font-family: ui-monospace, monospace; font-size: .75rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 1rem;
+  }
+  h1 {
+    font-family: var(--display); font-size: clamp(1.75rem, 5vw, 2.75rem);
+    line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 .75rem;
+  }
+  p { line-height: 1.6; color: var(--muted); margin: 0 0 1.75rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: .625rem; }
+  a {
+    display: inline-block; padding: .7rem 1.1rem; border-radius: var(--radius);
+    text-decoration: none; font-size: .9375rem; font-weight: 600;
+    background: var(--accent); color: var(--bg);
+  }
+  a.ghost { background: transparent; color: var(--text); border: 1px solid var(--muted); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">404</p>
+  <h1>That page isn't here.</h1>
+  <p>The link may be old, or the address may have a typo in it. Everything else is still where it was.</p>
+  <div class="actions">
+    <a href="/">Back to home</a>
+    <a class="ghost" href="/[PRIMARY ACTION PATH]">[PRIMARY ACTION]</a>
+  </div>
+</main>
+</body>
+</html>

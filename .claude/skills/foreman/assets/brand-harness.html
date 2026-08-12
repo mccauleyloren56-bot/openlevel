@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brand harness</title>
+<!--
+  THROWAWAY FILE. Not part of the real project. Delete it once the tokens are locked.
+
+  How to use it:
+  1. Replace every [BRACKET] with the owner's real content. Never lorem ipsum.
+  2. Fill the three :root blocks with three genuinely different directions.
+     Do not ship a variant from the AI-default set unless the owner chose it:
+     cream + serif + terracotta, near-black + acid accent, broadsheet hairlines.
+  3. Swap in real font links in <head> for each variant.
+  4. Open it, compare side by side, pick one.
+  5. Copy the winning values into the build brief as locked tokens.
+-->
+<style>
+  /* ---------- VARIANT A: [name the direction in two words] ---------- */
+  .v-a {
+    --bg:        #0F1115;
+    --surface:   #171A21;
+    --text:      #F2F3F5;
+    --muted:     #9AA1AC;
+    --accent:    #4F7CFF;
+    --radius:    4px;
+    --display:   Georgia, serif;          /* replace */
+    --body:      system-ui, sans-serif;   /* replace */
+    --step-lg:   clamp(2.5rem, 6vw, 4rem);
+    --step-md:   1.25rem;
+    --step-sm:   0.875rem;
+  }
+  /* ---------- VARIANT B ---------- */
+  .v-b {
+    --bg:        #FFFFFF;
+    --surface:   #F5F5F3;
+    --text:      #141414;
+    --muted:     #6B6B6B;
+    --accent:    #1C5D3A;
+    --radius:    0px;
+    --display:   system-ui, sans-serif;
+    --body:      system-ui, sans-serif;
+    --step-lg:   clamp(2.25rem, 5vw, 3.5rem);
+    --step-md:   1.125rem;
+    --step-sm:   0.8125rem;
+  }
+  /* ---------- VARIANT C ---------- */
+  .v-c {
+    --bg:        #101820;
+    --surface:   #17222C;
+    --text:      #E8EDF2;
+    --muted:     #8A9AA8;
+    --accent:    #C9A227;
+    --radius:    999px;
+    --display:   Georgia, serif;
+    --body:      system-ui, sans-serif;
+    --step-lg:   clamp(2.5rem, 6vw, 4.25rem);
+    --step-md:   1.1875rem;
+    --step-sm:   0.8125rem;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #08090B; }
+  .variant { background: var(--bg); color: var(--text); font-family: var(--body);
+             padding: 2.5rem 1.5rem 3.5rem; border-bottom: 1px solid #23262C; }
+  .wrap { max-width: 68ch; margin: 0 auto; }
+
+  .nav { display: flex; align-items: center; justify-content: space-between;
+         padding-bottom: 2.5rem; }
+  .logo { display: flex; align-items: center; gap: .5rem;
+          font-family: var(--display); font-size: var(--step-md); letter-spacing: -0.01em; }
+  .logo svg { display: block; }
+  .nav-links { display: flex; gap: 1.25rem; font-size: var(--step-sm); color: var(--muted); }
+
+  h1 { font-family: var(--display); font-size: var(--step-lg); line-height: 1.05;
+       letter-spacing: -0.02em; margin: 0 0 1rem; }
+  .lede { font-size: var(--step-md); line-height: 1.55; margin: 0 0 1.75rem; }
+  .muted { color: var(--muted); font-size: var(--step-sm); line-height: 1.6; }
+
+  .btn { display: inline-block; background: var(--accent); color: var(--bg);
+         padding: .7rem 1.25rem; border-radius: var(--radius); text-decoration: none;
+         font-size: var(--step-sm); font-weight: 600; }
+  .btn-ghost { background: transparent; color: var(--text);
+               border: 1px solid var(--muted); margin-left: .5rem; }
+
+  .card { background: var(--surface); border-radius: var(--radius);
+          padding: 1.25rem; margin-top: 2.25rem; }
+  .card h3 { font-family: var(--display); margin: 0 0 .4rem; font-size: var(--step-md); }
+
+  .tokens { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 2.25rem; }
+  .swatch { flex: 1 1 90px; border-radius: var(--radius); overflow: hidden;
+            border: 1px solid rgba(127,127,127,.25); }
+  .chip { height: 44px; }
+  .swatch span { display: block; padding: .35rem .5rem; font-size: 11px;
+                 font-family: ui-monospace, monospace; color: var(--muted); }
+  .label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+           color: var(--muted); font-family: ui-monospace, monospace; margin-bottom: 1.5rem; }
+</style>
+</head>
+<body>
+
+<!-- Duplicate this block per variant. Only the class on .variant changes. -->
+<section class="variant v-a">
+  <div class="wrap">
+    <div class="label">Variant A · [two-word direction]</div>
+
+    <nav class="nav">
+      <div class="logo">
+        <!-- Replace with the real SVG mark. Placeholder monogram below. -->
+        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+          <rect width="24" height="24" rx="3" fill="var(--accent)"></rect>
+        </svg>
+        [NAME]
+      </div>
+      <div class="nav-links"><span>Work</span><span>About</span><span>CV</span></div>
+    </nav>
+
+    <h1>[REAL HERO LINE, ONE SENTENCE]</h1>
+    <p class="lede">[REAL BIO PARAGRAPH. The owner's actual words, two or three sentences, so the type is judged on real text.]</p>
+
+    <a class="btn" href="#">[PRIMARY ACTION]</a>
+    <a class="btn btn-ghost" href="#">[secondary, or delete]</a>
+
+    <div class="card">
+      <h3>[PROJECT TITLE]</h3>
+      <p class="muted">[One real sentence about the project, plus the result or metric.]</p>
+    </div>
+
+    <div class="tokens">
+      <div class="swatch"><div class="chip" style="background:var(--bg)"></div><span>bg</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--surface)"></div><span>surface</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--text)"></div><span>text</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--muted)"></div><span>muted</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--accent)"></div><span>accent</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="variant v-b">
+  <div class="wrap">
+    <div class="label">Variant B · [two-word direction]</div>
+
+    <nav class="nav">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+          <rect width="24" height="24" rx="3" fill="var(--accent)"></rect>
+        </svg>
+        [NAME]
+      </div>
+      <div class="nav-links"><span>Work</span><span>About</span><span>CV</span></div>
+    </nav>
+
+    <h1>[REAL HERO LINE, ONE SENTENCE]</h1>
+    <p class="lede">[REAL BIO PARAGRAPH. The owner's actual words, two or three sentences, so the type is judged on real text.]</p>
+
+    <a class="btn" href="#">[PRIMARY ACTION]</a>
+    <a class="btn btn-ghost" href="#">[secondary, or delete]</a>
+
+    <div class="card">
+      <h3>[PROJECT TITLE]</h3>
+      <p class="muted">[One real sentence about the project, plus the result or metric.]</p>
+    </div>
+
+    <div class="tokens">
+      <div class="swatch"><div class="chip" style="background:var(--bg)"></div><span>bg</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--surface)"></div><span>surface</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--text)"></div><span>text</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--muted)"></div><span>muted</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--accent)"></div><span>accent</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="variant v-c">
+  <div class="wrap">
+    <div class="label">Variant C · [two-word direction]</div>
+
+    <nav class="nav">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+          <rect width="24" height="24" rx="3" fill="var(--accent)"></rect>
+        </svg>
+        [NAME]
+      </div>
+      <div class="nav-links"><span>Work</span><span>About</span><span>CV</span></div>
+    </nav>
+
+    <h1>[REAL HERO LINE, ONE SENTENCE]</h1>
+    <p class="lede">[REAL BIO PARAGRAPH. The owner's actual words, two or three sentences, so the type is judged on real text.]</p>
+
+    <a class="btn" href="#">[PRIMARY ACTION]</a>
+    <a class="btn btn-ghost" href="#">[secondary, or delete]</a>
+
+    <div class="card">
+      <h3>[PROJECT TITLE]</h3>
+      <p class="muted">[One real sentence about the project, plus the result or metric.]</p>
+    </div>
+
+    <div class="tokens">
+      <div class="swatch"><div class="chip" style="background:var(--bg)"></div><span>bg</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--surface)"></div><span>surface</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--text)"></div><span>text</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--muted)"></div><span>muted</span></div>
+      <div class="swatch"><div class="chip" style="background:var(--accent)"></div><span>accent</span></div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

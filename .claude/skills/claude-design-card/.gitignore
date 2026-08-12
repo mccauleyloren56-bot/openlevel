@@ -1,0 +1,22 @@
+# AI session planning artifacts
+docs/
+
+# AI tool managed skill copies (tool-generated, not source of truth)
+.agents/
+.augment/
+.claude/
+.codebuddy/
+.kiro/
+.superpowers/
+
+# Editor/IDE
+.codex
+
+# Node.js
+node_modules/
+
+# OS
+.DS_Store
+
+# Commercial fonts (download separately)
+assets/TsangerJinKai02*.ttf

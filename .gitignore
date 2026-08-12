@@ -4,7 +4,8 @@ server-dist
 .env
 *.log
 .DS_Store
-.claude/
+.claude/*
+!.claude/skills/
 
 # The workspace-root .gitignore has a Python-style `lib/` rule (build output)
 # that accidentally swallows our React source dir `src/lib/`. Re-include it.
